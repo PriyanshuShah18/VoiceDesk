@@ -15,7 +15,7 @@ class BookingService:
         logging.info("Initializing BookingService (Simulation)")
         # Simulating a simple in-memory database of bookings
         load_dotenv()
-        
+
         mongo_uri= get_secret("MONGO_URI")
         db_name= get_secret("DB_NAME","ai_receptionist")
 
@@ -26,8 +26,22 @@ class BookingService:
             mongo_uri,
             tls=True,
             tlsCAFile=certifi.where(),
+            retryWrites=True,
+            retryReads=True,
+
+            maxPoolSize=10,
+            minPoolSize=1,
+
             serverSelectionTimeoutMS=5000,
+            connectTimeoutMS=20000,
+            socketTimeoutMS=20000,
             )
+        try:
+            self.client.admin.command("ping")
+            logging.info("MongoDB connected successfully.")
+        except Exception as e:
+            logging.error(f"MongoDB connection failed: {e}")
+
         self.db= self.client[db_name]
 
         self.collection = self.db["appointments"]
