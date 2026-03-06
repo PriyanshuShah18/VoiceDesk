@@ -1,0 +1,16 @@
+faster-whisper
+ollama
+langchain
+dateparser
+sounddevice
+pydub
+transformers
+torch
+torchaudio
+python-dotenv
+streamlit
+langchain-community
+langchain-ollama
+langchain-groq
+scipy
+
