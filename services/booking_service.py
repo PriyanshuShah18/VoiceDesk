@@ -40,23 +40,32 @@ class BookingService:
         logging.info("Initializing BookingService (Simulation)")
         # Simulating a simple in-memory database of bookings
 
+        self.use_memory= False
+        self.memory_bookings= []
+
+
         db_name = get_secret("DB_NAME","ai-receptionist")
 
-        self.client= get_mongo_client()
+        try:
+            self.client= get_mongo_client()
 
-        self.db= self.client[db_name]
+            self.db= self.client[db_name]
 
-        self.collection = self.db["appointments"]
+            self.collection = self.db["appointments"]
 
         # Ensure unique index to prevent double booking
-        try:
-            self.collection.create_index(
-                [("date",1),("time",1)],
-                unique=True,
-                background=True
-            )
+            try:
+                self.collection.create_index(
+                    [("date",1),("time",1)],
+                    unique=True,
+                    background=True
+                )
+            except Exception as e:
+                logging.warning(f"Index creation skipped: {e}")
         except Exception as e:
-            logging.warning(f"Index creation skipped: {e}")
+            logging.warning(f"MongoDB unavailable. Using in-memory fallback. Error: {e}")
+
+            self.use_memory = True
 
     def check_availability(self, date: str, time: str) -> bool:
         """
@@ -65,7 +74,13 @@ class BookingService:
         """
         logging.debug(f"Checking availability for {date} at {time}")
         
-        booking = self.collection.find_one({
+        if self.use_memory:
+
+            for booking in self.memory_bookings:
+                if booking["date"] == date and booking["time"] == time:
+                    return False
+            return True
+        booking= self.collection.find_one({
             "date": date,
             "time":time,
         })
@@ -97,13 +112,19 @@ class BookingService:
             "date":date,
             "time":time,
             "status": "CONFIRMED",
-            "created-at": datetime.utcnow(),
+            "created_at": datetime.utcnow(),
         }
         
         try:
-            result = self.collection.insert_one(booking_doc)
+            if self.use_memory:
+                booking_doc["id"] = len(self.memory_bookings) + 1
+                self.memory_bookings.append(booking_doc)
+           
+            else:
+                result = self.collection.insert_one(booking_doc)
+                booking_doc["id"] = str(result.inserted_id)
 
-            booking_doc["id"] = str(result.inserted_id)
+            
 
             logging.info(f"Booking confirmed: {booking_doc}")
 
