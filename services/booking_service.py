@@ -5,6 +5,8 @@ from typing import Dict, Any
 
 from pymongo import MongoClient
 from pymongo.errors import DuplicateKeyError
+import certifi
+
 from dotenv import load_dotenv
 
 class BookingService:
@@ -19,7 +21,11 @@ class BookingService:
         if not mongo_uri:
             raise ValueError("MONGO_URI is not found ")
 
-        self.client = MongoClient(mongo_uri)
+        self.client = MongoClient(
+            mongo_uri,
+            tls=True,
+            tlsCAFile=certifi.where(),
+            )
         self.db= self.client[db_name]
 
         self.collection = self.db["appointments"]
