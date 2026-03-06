@@ -6,6 +6,7 @@ from typing import Dict, Any
 from pymongo import MongoClient
 from pymongo.errors import DuplicateKeyError
 import certifi
+from config import get_secret
 
 from dotenv import load_dotenv
 
@@ -14,9 +15,9 @@ class BookingService:
         logging.info("Initializing BookingService (Simulation)")
         # Simulating a simple in-memory database of bookings
         load_dotenv()
-
-        mongo_uri= os.getenv("MONGO_URI")
-        db_name= os.getenv("DB_NAME","ai_receptionist")
+        
+        mongo_uri= get_secret("MONGO_URI")
+        db_name= get_secret("DB_NAME","ai_receptionist")
 
         if not mongo_uri:
             raise ValueError("MONGO_URI is not found ")
@@ -25,6 +26,7 @@ class BookingService:
             mongo_uri,
             tls=True,
             tlsCAFile=certifi.where(),
+            serverSelectionTimeoutMS=5000,
             )
         self.db= self.client[db_name]
 
