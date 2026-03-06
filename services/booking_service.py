@@ -1,57 +1,62 @@
 import logging
-import os
+
 from datetime import datetime
 from typing import Dict, Any
+import streamlit as st
 
 from pymongo import MongoClient
 from pymongo.errors import DuplicateKeyError
 import certifi
 from config import get_secret
 
-from dotenv import load_dotenv
+@st.cache_resource
+def get_mongo_client():
+
+    mongo_uri= get_secret("MONGO_URI")
+
+    if not mongo_uri:
+        raise ValueError("MONGO_URI is not configured")
+
+    client= MongoClient(
+        mongo_uri,
+        tls=True,
+        tlsCAFile=certifi.where(),
+        retryWrites=True,
+        retryReads=True,
+        maxPoolSize=10,
+        minPoolSize=1,
+        serverSelectionTimeoutMS=5000,
+        connectTimeoutMS=20000,
+        socketTimeoutMS=20000,
+    )
+
+    client.admin.command("ping")
+
+    return client
+
 
 class BookingService:
     def __init__(self):
         logging.info("Initializing BookingService (Simulation)")
         # Simulating a simple in-memory database of bookings
-        load_dotenv()
 
-        mongo_uri= get_secret("MONGO_URI")
-        db_name= get_secret("DB_NAME","ai_receptionist")
+        db_name = get_secret("DB_NAME","ai-receptionist")
 
-        if not mongo_uri:
-            raise ValueError("MONGO_URI is not found ")
-
-        self.client = MongoClient(
-            mongo_uri,
-            tls=True,
-            tlsCAFile=certifi.where(),
-            retryWrites=True,
-            retryReads=True,
-
-            maxPoolSize=10,
-            minPoolSize=1,
-
-            serverSelectionTimeoutMS=5000,
-            connectTimeoutMS=20000,
-            socketTimeoutMS=20000,
-            )
-        try:
-            self.client.admin.command("ping")
-            logging.info("MongoDB connected successfully.")
-        except Exception as e:
-            logging.error(f"MongoDB connection failed: {e}")
+        self.client= get_mongo_client()
 
         self.db= self.client[db_name]
 
         self.collection = self.db["appointments"]
 
         # Ensure unique index to prevent double booking
-
-        self.collection.create_index(
-            [("date",1),("time",1)],
-            unique=True,
-        )
+        try:
+            self.collection.create_index(
+                [("date",1),("time",1)],
+                unique=True,
+                background=True
+            )
+        except Exception as e:
+            logging.warning(f"Index creation skipped: {e}")
 
     def check_availability(self, date: str, time: str) -> bool:
         """
@@ -64,6 +69,8 @@ class BookingService:
             "date": date,
             "time":time,
         })
+
+        return booking is None
 
     def book_appointment(self, details: Dict[str, Any]) -> dict:
         """
@@ -78,6 +85,12 @@ class BookingService:
             logging.error("Missing details for booking")
             return {"success": False, "message": "Missing necessary booking details."}
         
+        if not self.check_availability(date,time):
+            return{
+                "success":False,
+                "message": "The requested time slot is unavailable."
+            }
+
         booking_doc= {
             "name":name,
             "phone":phone,
