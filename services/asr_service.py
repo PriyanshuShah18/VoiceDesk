@@ -3,7 +3,9 @@ import logging
 from faster_whisper import WhisperModel
 import requests
 from pydantic import BaseModel, Field, field_validator
-
+from transformers import AutoModel
+import torchaudio
+import torch
 
 class TranscriptionResponse(BaseModel):
     text: str = Field(description="The transcribed text")
@@ -25,7 +27,6 @@ class TranscriptionResponse(BaseModel):
                 return "en"
         return v or "en"
 
-
 class ASRService:
     def __init__(self, model_size="medium", device="cpu", compute_type="int8"):
         """
@@ -34,8 +35,22 @@ class ASRService:
         Otherwise falls back to local faster-whisper.
         """
         self.groq_api_key = os.getenv("GROQ_API_KEY")
+        
+        logging.info("Loading Local IndicConformer ASR model")
+
         self.hf_token = os.getenv("HF_TOKEN")
-        self.hf_api_url = "https://api-inference.huggingface.co/models/ai4bharat/indic-conformer-600m-multilingual"
+
+        self.indic_model = AutoModel.from_pretrained(
+            "ai4bharat/indic-conformer-600m-multilingual",
+            token = self.hf_token,
+            trust_remote_code=True,
+        )
+
+        self.indic_model.eval()
+       
+        logging.info("IndicConformer loaded successfully.")
+        self.hf_token = os.getenv("HF_TOKEN")
+        self.hf_api_url = "https://router.huggingface.co/models/ai4bharat/indic-conformer-600m-multilingual"
         
         if self.hf_token:
             logging.info("Initializing Hugging Face ASR Support (AI4Bharat IndicConformer)...")
@@ -49,6 +64,24 @@ class ASRService:
             self.model = WhisperModel(model_size, device=device, compute_type=compute_type)
             logging.info("Local ASR Model loaded successfully.")
 
+    def _transcribe_indic(self, audio_path: str) -> dict:
+        logging.info(f"Transcribing via Local IndiCconformer: {audio_path}")
+
+        try:
+            speech, sr = torchaudio.load(audio_path)
+            
+            if sr != 16000:
+                speech = torchaudio.functional.resample(speech, sr, 16000)
+
+            speech = speech.squeeze().numpy()
+
+            text = self.indic_model.transcribe(speech)
+
+            return TranscriptionResponse(text=text, language="gu").model_dump()
+
+        except Exception as e:
+            logging.error(f"IndicConformer transcription failed: {e}")
+            return TranscriptionResponse(text="", language="en").model_dump()   
     def transcribe(self, audio_path: str, forced_language: str = None, provider: str = "auto") -> dict:
         """
         Transcribes the given audio file using the specified provider.
@@ -56,20 +89,21 @@ class ASRService:
         """
         if provider == "smart" or provider == "auto":
             return self._transcribe_smart(audio_path, forced_language)
-        elif provider == "huggingface" and self.hf_token:
-            return self._transcribe_huggingface(audio_path, forced_language)
+        elif provider == "huggingface":
+            return self._transcribe_indic(audio_path)
         elif (provider == "groq") and self.groq_api_key:
             return self._transcribe_groq(audio_path, forced_language)
         elif provider == "local" or self.model:
             return self._transcribe_local(audio_path, forced_language)
         else:
             # Fallback chain
-            if self.hf_token: return self._transcribe_huggingface(audio_path, forced_language)
+            if self.groq_api_key:
+                 return self._transcribe_groq(audio_path, forced_language)
             return TranscriptionResponse(text="", language="en").model_dump()
 
     def _transcribe_smart(self, audio_path: str, forced_language: str = None) -> dict:
         """
-        Smart Hybrid Mode: Uses Groq for initial detection. 
+        Smart Hybrid Mode: Uses Groq for initial detection.
         If it's English, trust Groq. If it's Gujarati/Hindi, use HF for better accuracy.
         """
         logging.info("Running Smart Hybrid ASR...")
@@ -80,23 +114,22 @@ class ASRService:
         transcribed_text = groq_result.get("text", "")
         
         # 2. Routing Decision
-        # If it's English, Groq is the best. Trust it.
+        # English for Groq.
         if detected_lang == "en":
             logging.info("Smart Hybrid: Detected English. Sticking with Groq.")
             return groq_result
             
-        # If it's Gujarati and we have HF, get the high-accuracy version
-        if detected_lang == "gu" and self.hf_token:
-            logging.info("Smart Hybrid: Detected Gujarati. Routing to Hugging Face for high accuracy.")
-            hf_result = self._transcribe_huggingface(audio_path, forced_language="gu")
+        # High Accuracy HF version for Gujarati.
+        if detected_lang == "gu":
+            logging.info("Smart Hybrid: Detected Gujarati. Routing to IndicConformer.")
             
-            # Script Safety Check: If HF returns something that looks like gibberish 
-            # compared to Groq's confidence, or if it's too short, return Groq's.
-            if len(hf_result.get("text", "")) < 2 and len(transcribed_text) > 5:
+            indic_result = self._transcribe_indic(audio_path)
+            
+            if len(indic_result.get("text", "")) < 2 and len(transcribed_text) > 5:
                 logging.warning("HF result too short, falling back to Groq.")
                 return groq_result
                 
-            return hf_result
+            #return indic_result
             
         return groq_result
 
@@ -137,7 +170,7 @@ class ASRService:
             logging.error(f"Error during Groq transcription: {e}")
             return TranscriptionResponse(text="", language="en").model_dump()
 
-    def _transcribe_huggingface(self, audio_path: str, forced_language: str = None) -> dict:
+    '''def _transcribe_huggingface(self, audio_path: str, forced_language: str = None) -> dict:
         logging.info(f"Transcribing via Hugging Face ASR: {audio_path}")
         lang = forced_language if forced_language else "gu"
         
@@ -169,7 +202,7 @@ class ASRService:
         except Exception as e:
             logging.error(f"Error during Hugging Face transcription: {e}")
             return TranscriptionResponse(text="", language="en").model_dump()
-
+'''
     def _transcribe_local(self, audio_path: str, forced_language: str = None) -> dict:
         logging.debug(f"Transcribing locally from: {audio_path} (Forced: {forced_language})")
         

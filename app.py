@@ -134,7 +134,7 @@ def main():
 
                 st.divider()
                 st.subheader("Assistant Response")
-                st.write(result['response_text'])
+                #st.write(result['response_text'])
                 
                 if result['audio_path'] and os.path.exists(result['audio_path']):
                     st.audio(result['audio_path'], format="audio/wav", autoplay=True)

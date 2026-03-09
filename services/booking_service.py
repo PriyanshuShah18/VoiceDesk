@@ -34,7 +34,6 @@ def get_mongo_client():
 
     return client
 
-
 class BookingService:
     def __init__(self):
         logging.info("Initializing BookingService (Simulation)")
@@ -42,7 +41,6 @@ class BookingService:
 
         self.use_memory= False
         self.memory_bookings= []
-
 
         db_name = get_secret("DB_NAME","ai-receptionist")
 
@@ -123,8 +121,6 @@ class BookingService:
             else:
                 result = self.collection.insert_one(booking_doc)
                 booking_doc["id"] = str(result.inserted_id)
-
-            
 
             logging.info(f"Booking confirmed: {booking_doc}")
 

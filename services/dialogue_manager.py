@@ -39,7 +39,6 @@ class DialogueManager:
         """
         Returns a list of missing booking fields.
         """
-
         missing = []
 
         if not self.state.get("name"):

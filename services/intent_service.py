@@ -6,7 +6,6 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 from pydantic import BaseModel, Field, field_validator
 
-
 SUPPORTED_INTENTS = [
     "BOOK_APPOINTMENT",
     "CHECK_SLOTS",
@@ -32,7 +31,6 @@ class IntentResult(BaseModel):
             return "UNKNOWN"
             
         return intent
-
 
 class IntentService:
     def __init__(self, model_name=None):

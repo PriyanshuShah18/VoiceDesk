@@ -44,7 +44,6 @@ class ExtractedEntities(BaseModel):
             return None
         return value
 
-
 class EntityExtractor:
     def __init__(self, model_name=None):
         """
@@ -167,8 +166,6 @@ User input: "{text}"
                 for key in ["name","phone","date","time"]:
                     if not final_entities.get(key) and previous_state.get(key):
                         final_entities[key] = previous_state[key]
-
-
 
             return final_entities
             

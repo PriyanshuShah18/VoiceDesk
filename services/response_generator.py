@@ -16,16 +16,16 @@ class ResponseGenerator:
         if groq_api_key:
             model = model_name or "llama-3.3-70b-versatile"
             logging.info(f"Initializing ResponseGenerator with Groq model: {model}")
-            self.llm = ChatGroq(temperature=0.7, groq_api_key=groq_api_key, model_name=model)
+            self.llm = ChatGroq(temperature=0.4, groq_api_key=groq_api_key, model_name=model)
         else:
             model = model_name or "llama3"
             logging.info(f"Initializing ResponseGenerator with Local Ollama model: {model}")
-            self.llm = ChatOllama(model=model, temperature=0.7)
+            self.llm = ChatOllama(model=model, temperature=0.4)
         
         prompt_template = """
-You are a polite, helpful AI receptionist for a service business.
+You are a helpful receptionist for a service business.
 Your goal is to converse naturally with the user based on the current context.
-Keep your responses VERY brief (1-2 sentences max) as they will be spoken aloud to the user over phone/audio.
+Keep your responses concise as they will be spoken aloud to the user over phone/audio.
 
 User's language: {language}
 Current conversation state: {state}
