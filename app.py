@@ -1,6 +1,14 @@
 import streamlit as st
 import os
 
+# Huggingface disk cache 
+os.environ["HF_HOME"] = "tmp/huggingface"
+os.environ["TRANSFORMERS_CACHE"] = "/tmp/huggingface"
+os.environ["HF_DATASETS_CACHE"] = "/tmp/huggingface"
+
+# Creating a directory if it doesn't exist already
+os.makedirs("/tmp/huggingface", exist_ok=True)
+
 # Force CPU mode for all ML libraries to avoid CUDA DLL errors on Windows
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 os.environ["CT2_USE_CUDA"] = "0"
@@ -53,6 +61,9 @@ st.markdown("""
 @st.cache_resource
 def load_agent():
     return VoiceAgent()
+
+def load_asr():
+    return IndicConformer.from_pretrained("ai4bharat/indic-conformer-600m-multilingual", use_fast=True)
 
 def main():
     st.write("Converse in Gujarati or English to book an appointment.")

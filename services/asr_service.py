@@ -7,6 +7,8 @@ from transformers import AutoModel
 import torchaudio
 import torch
 
+from utils.model_cache import load_indic_conformer
+
 class TranscriptionResponse(BaseModel):
     text: str = Field(description="The transcribed text")
     language: str = Field(description="The ISO 639-1 language code (e.g., 'en', 'gu', 'hi')")
@@ -40,18 +42,21 @@ class ASRService:
 
         self.hf_token = os.getenv("HF_TOKEN")
 
-        self.indic_model = AutoModel.from_pretrained(
-            "ai4bharat/indic-conformer-600m-multilingual",
-            token = self.hf_token,
-            trust_remote_code=True,
-        )
+        #self.indic_model = AutoModel.from_pretrained(
+        #    "ai4bharat/indic-conformer-600m-multilingual",
+        #    token = self.hf_token,
+        #    trust_remote_code=True,
+        #)
+
+        self.indic_model = load_indic_conformer()
 
         self.indic_model.eval()
        
         logging.info("IndicConformer loaded successfully.")
         self.hf_token = os.getenv("HF_TOKEN")
         self.hf_api_url = "https://router.huggingface.co/models/ai4bharat/indic-conformer-600m-multilingual"
-        
+    
+
         if self.hf_token:
             logging.info("Initializing Hugging Face ASR Support (AI4Bharat IndicConformer)...")
         

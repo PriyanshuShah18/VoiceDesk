@@ -7,6 +7,8 @@ from uuid import uuid4
 from transformers import VitsModel, AutoTokenizer
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from utils.model_cache import load_mms_tts
+
 class SpeechRequest(BaseModel):
     model_config = ConfigDict(extra='ignore')
     
@@ -61,8 +63,10 @@ class TTSService:
 
             logging.info(f"Loading local TTS model: {model_id}")
             
-            tokenizer = AutoTokenizer.from_pretrained(model_id)
-            model= VitsModel.from_pretrained(model_id)
+            tokenizer,model = load_mms_tts(model_id)
+
+            #tokenizer = AutoTokenizer.from_pretrained(model_id)
+            #model= VitsModel.from_pretrained(model_id)
 
             self.loaded_tokenizers[lang_code] = tokenizer
             self.loaded_models[lang_code] = model
