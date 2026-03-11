@@ -3,11 +3,16 @@ import torch
 import os
 from uuid import uuid4
 
-
 from transformers import VitsModel, AutoTokenizer
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from utils.model_cache import load_mms_tts
+
+import tempfile
+
+import numpy as np
+
+import soundfile as sf  # Faster audio writing
 
 class SpeechRequest(BaseModel):
     model_config = ConfigDict(extra='ignore')
@@ -29,19 +34,27 @@ class SpeechRequest(BaseModel):
         return self
 
 class TTSService:
-    def __init__(self, output_dir="output_audio"):
+    def __init__(self):
         """
         Initializes the TTS service.
         """
         logging.info("Initializing TTS Service with local Meta MMS fallback")
         
-        self.output_dir = output_dir
+        #self.output_dir = output_dir
+        #os.makedirs(self.output_dir, exist_ok=True)
+        self.device = torch.device("cpu")
+
+        torch.set_grad_enabled(False)
+
+        torch.set_num_threads(4)
+
+        # Temp directory 
+        self.output_dir= os.path.join(tempfile.gettempdir(), "tts_audio")
         os.makedirs(self.output_dir, exist_ok=True)
-        
         # Model mapping for local fallback
         self.model_map = {
             "gu": "facebook/mms-tts-guj",
-            "hi": "facebook/mms-tts-hin",
+            #"hi": "facebook/mms-tts-hin",
             "en": "facebook/mms-tts-eng"
         }
         
@@ -68,11 +81,18 @@ class TTSService:
             #tokenizer = AutoTokenizer.from_pretrained(model_id)
             #model= VitsModel.from_pretrained(model_id)
 
-            self.loaded_tokenizers[lang_code] = tokenizer
+            model.to(self.device)
+            model.eval()
+
+            # PyTorch model compilation for faster inference
+            #model= torch.compile(model)
+
             self.loaded_models[lang_code] = model
+            self.loaded_tokenizers[lang_code] = tokenizer
+            
 
         return self.loaded_tokenizers[lang_code], self.loaded_models[lang_code]
-
+    
 
     def generate_speech(self, text: str,language_code="en") -> str:
         """
@@ -84,31 +104,40 @@ class TTSService:
 
         tokenizer, model = self._get_mms_model(lang)
 
-        if model is None:
-            logging.error("TTS model unavailable")
-            return None
-
         try:
             logging.info(f"Generating speech for language '{lang}'")
 
-            inputs = tokenizer(request.text, return_tensors="pt")
+            inputs = tokenizer(request.text, return_tensors="pt", padding=False)
+            inputs = {k: v.to(self.device) for k,v in inputs.items()}
 
             with torch.no_grad():
-                output = model(**inputs).waveform
+                output= model(**inputs)
 
-            audio = output.cpu().numpy().squeeze()
+            waveform = output.waveform
+
+            audio = waveform.squeeze().cpu().numpy()
+
+            # Squeeze() -> Removes batch dimension
+            # cpu() -> Ensures tensor on CPU
+            # numpy() -> Convert to numpy, Results in an array of audio samples
+            
+            
+            peak = np.max(np.abs(audio))
+            if peak > 0:
+                audio = audio / peak
+            #audio = output.cpu().numpy().squeeze()
 
             # Normalize audio
 
-            audio = audio / max(abs(audio))
+            #audio = audio / np.max(np.abs(audio))
 
             sample_rate = model.config.sampling_rate
 
             filename = f"response_{uuid4().hex[:8]}.wav"
             output_path = os.path.join(self.output_dir, filename)
 
-            import scipy.io.wavfile as wavfile
-            wavfile.write(output_path, sample_rate, audio.astype("float32"))
+            # Faster audio writing.
+            sf.write(output_path, audio, sample_rate, format="WAV")
 
             logging.info(f"TTS audio saved to {output_path}")
 

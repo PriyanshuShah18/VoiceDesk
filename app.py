@@ -1,15 +1,22 @@
 import streamlit as st
 import os
 
-# Huggingface disk cache 
-os.environ["HF_HOME"] = "tmp/huggingface"
-os.environ["TRANSFORMERS_CACHE"] = "/tmp/huggingface"
-os.environ["HF_DATASETS_CACHE"] = "/tmp/huggingface"
+# Inject Streamlit Cloud secrets into environment (secrets are not available via .env on Cloud)
+try:
+    for _k, _v in st.secrets.items():
+        os.environ.setdefault(_k, str(_v))
+except Exception:
+    pass  # Running locally — .env will be used instead
 
-# Creating a directory if it doesn't exist already
-os.makedirs("/tmp/huggingface", exist_ok=True)
+# Hugging Face cache — use /tmp on Linux/Cloud, keep relative path only on Windows locally
+_is_linux = os.name != 'nt'
+_hf_cache = "/tmp/huggingface" if _is_linux else "tmp/huggingface"
+os.environ["HF_HOME"] = _hf_cache
+os.environ["TRANSFORMERS_CACHE"] = _hf_cache
+os.environ["HF_DATASETS_CACHE"] = _hf_cache
+os.makedirs(_hf_cache, exist_ok=True)
 
-# Force CPU mode for all ML libraries to avoid CUDA DLL errors on Windows
+# Force CPU mode for all ML libraries
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 os.environ["CT2_USE_CUDA"] = "0"
 
@@ -62,8 +69,7 @@ st.markdown("""
 def load_agent():
     return VoiceAgent()
 
-def load_asr():
-    return IndicConformer.from_pretrained("ai4bharat/indic-conformer-600m-multilingual", use_fast=True)
+# [REMOVED] load_asr() was dead code referencing an undefined IndicConformer class
 
 def main():
     st.write("Converse in Gujarati or English to book an appointment.")

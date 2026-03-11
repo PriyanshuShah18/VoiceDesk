@@ -37,22 +37,19 @@ class ASRService:
         Otherwise falls back to local faster-whisper.
         """
         self.groq_api_key = os.getenv("GROQ_API_KEY")
-        
-        logging.info("Loading Local IndicConformer ASR model")
-
         self.hf_token = os.getenv("HF_TOKEN")
 
-        #self.indic_model = AutoModel.from_pretrained(
-        #    "ai4bharat/indic-conformer-600m-multilingual",
-        #    token = self.hf_token,
-        #    trust_remote_code=True,
-        #)
+        # DISABLE_LOCAL_ASR=true skips the 2.5GB IndicConformer load (required on Streamlit Cloud free tier)
+        _disable_local = os.getenv("DISABLE_LOCAL_ASR", "false").lower() == "true"
 
-        self.indic_model = load_indic_conformer()
-
-        self.indic_model.eval()
-       
-        logging.info("IndicConformer loaded successfully.")
+        if _disable_local:
+            logging.warning("Local IndicConformer disabled via DISABLE_LOCAL_ASR=true. Falling back to Groq for all ASR.")
+            self.indic_model = None
+        else:
+            logging.info("Loading Local IndicConformer ASR model...")
+            self.indic_model = load_indic_conformer(self.hf_token)
+            self.indic_model.eval()
+            logging.info("IndicConformer loaded successfully.")
         self.hf_token = os.getenv("HF_TOKEN")
         self.hf_api_url = "https://router.huggingface.co/models/ai4bharat/indic-conformer-600m-multilingual"
     
@@ -70,23 +67,33 @@ class ASRService:
             logging.info("Local ASR Model loaded successfully.")
 
     def _transcribe_indic(self, audio_path: str) -> dict:
-        logging.info(f"Transcribing via Local IndiCconformer: {audio_path}")
+        logging.info(f"Transcribing via Local IndicConformer: {audio_path}")
+
+        if self.indic_model is None:
+            logging.warning("IndicConformer not loaded (DISABLE_LOCAL_ASR=true). Skipping.")
+            return TranscriptionResponse(text="", language="en").model_dump()
 
         try:
             speech, sr = torchaudio.load(audio_path)
-            
+
             if sr != 16000:
                 speech = torchaudio.functional.resample(speech, sr, 16000)
 
-            speech = speech.squeeze().numpy()
+            # Model expects a [1, N] float32 tensor (batch of 1 waveform)
+            if speech.ndim == 1:
+                speech = speech.unsqueeze(0)   # [N] -> [1, N]
+            elif speech.shape[0] > 1:
+                speech = speech.mean(dim=0, keepdim=True)  # stereo -> mono [1, N]
 
-            text = self.indic_model.transcribe(speech)
+            # forward(wav, lang, decoding='ctc') — lang must be 'gu', 'hi', 'en', etc.
+            text = self.indic_model(speech, "gu", decoding="ctc")
 
             return TranscriptionResponse(text=text, language="gu").model_dump()
 
         except Exception as e:
             logging.error(f"IndicConformer transcription failed: {e}")
-            return TranscriptionResponse(text="", language="en").model_dump()   
+            return TranscriptionResponse(text="", language="en").model_dump()
+
     def transcribe(self, audio_path: str, forced_language: str = None, provider: str = "auto") -> dict:
         """
         Transcribes the given audio file using the specified provider.
