@@ -39,17 +39,21 @@ class ASRService:
         self.groq_api_key = os.getenv("GROQ_API_KEY")
         self.hf_token = os.getenv("HF_TOKEN")
 
-        # DISABLE_LOCAL_ASR=true skips the 2.5GB IndicConformer load (required on Streamlit Cloud free tier)
-        _disable_local = os.getenv("DISABLE_LOCAL_ASR", "false").lower() == "true"
+        # IndicConformer is disabled by default for Streamlit Cloud stability.
+        # To re-activate it Set DISABLE_LOCAL_ASR="false" in your Streamlit secrets/env.
+        _disable_local = os.getenv("DISABLE_LOCAL_ASR", "true").lower() == "true"
 
         if _disable_local:
-            logging.warning("Local IndicConformer disabled via DISABLE_LOCAL_ASR=true. Falling back to Groq for all ASR.")
+            logging.warning("Local IndicConformer disabled (default for Cloud). Falling back to Groq for all ASR.")
             self.indic_model = None
         else:
             logging.info("Loading Local IndicConformer ASR model...")
             self.indic_model = load_indic_conformer(self.hf_token)
-            self.indic_model.eval()
-            logging.info("IndicConformer loaded successfully.")
+            if self.indic_model is not None:
+                self.indic_model.eval()
+                logging.info("IndicConformer loaded successfully.")
+            else:
+                logging.warning("IndicConformer failed to load.")
         self.hf_token = os.getenv("HF_TOKEN")
         self.hf_api_url = "https://router.huggingface.co/models/ai4bharat/indic-conformer-600m-multilingual"
     

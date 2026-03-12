@@ -14,6 +14,8 @@ import numpy as np
 
 import soundfile as sf  # Faster audio writing
 
+import streamlit as st
+
 class SpeechRequest(BaseModel):
     model_config = ConfigDict(extra='ignore')
     
@@ -33,6 +35,11 @@ class SpeechRequest(BaseModel):
             
         return self
 
+@st.cache_resource(show_spinner=False)
+def cached_load_mms(model_id):
+    tokenizer, model = load_mms_tts(model_id)
+    return tokenizer, model
+
 class TTSService:
     def __init__(self):
         """
@@ -40,13 +47,14 @@ class TTSService:
         """
         logging.info("Initializing TTS Service with local Meta MMS fallback")
         
+        os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
         #self.output_dir = output_dir
         #os.makedirs(self.output_dir, exist_ok=True)
         self.device = torch.device("cpu")
 
         torch.set_grad_enabled(False)
 
-        torch.set_num_threads(4)
+        torch.set_num_threads(2)
 
         # Temp directory 
         self.output_dir= os.path.join(tempfile.gettempdir(), "tts_audio")
@@ -76,12 +84,10 @@ class TTSService:
 
             logging.info(f"Loading local TTS model: {model_id}")
             
-            tokenizer,model = load_mms_tts(model_id)
-
-            #tokenizer = AutoTokenizer.from_pretrained(model_id)
-            #model= VitsModel.from_pretrained(model_id)
-
-            model.to(self.device)
+            #tokenizer,model = load_mms_tts(model_id)
+            tokenizer, model = cached_load_mms(model_id)
+    
+            model = model.to(self.device, non_blocking=True)
             model.eval()
 
             # PyTorch model compilation for faster inference
@@ -107,7 +113,7 @@ class TTSService:
         try:
             logging.info(f"Generating speech for language '{lang}'")
 
-            inputs = tokenizer(request.text, return_tensors="pt", padding=False)
+            inputs = tokenizer(request.text, return_tensors="pt")
             inputs = {k: v.to(self.device) for k,v in inputs.items()}
 
             with torch.no_grad():
