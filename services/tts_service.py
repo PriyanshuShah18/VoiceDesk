@@ -104,6 +104,12 @@ class TTSService:
         """
         Generates speech from text and saves it to a WAV file using local Meta MMS.
         """
+        max_chars = 400
+
+        if len(text) > max_chars:
+            text = text[:max_chars]
+            text = text[:text.rfind(" ")] + "..."
+
         request = SpeechRequest(text=text, language_code= language_code)
 
         lang = request.language_code
