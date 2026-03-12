@@ -1,26 +1,24 @@
 import os
 import logging
-from langchain_ollama import ChatOllama
 from langchain_groq import ChatGroq
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from config import get_secret
 
 class ResponseGenerator:
     def __init__(self, model_name=None):
         """
         Initializes the response generation service.
-        Checks for GROQ_API_KEY for cloud mode, otherwise local Ollama.
+        Uses Groq Cloud LLM for natural language generation.
         """
-        groq_api_key = os.getenv("GROQ_API_KEY")
+        groq_api_key = get_secret("GROQ_API_KEY")
         
-        if groq_api_key:
-            model = model_name or "llama-3.3-70b-versatile"
-            logging.info(f"Initializing ResponseGenerator with Groq model: {model}")
-            self.llm = ChatGroq(temperature=0.4, groq_api_key=groq_api_key, model_name=model)
-        else:
-            model = model_name or "llama3"
-            logging.info(f"Initializing ResponseGenerator with Local Ollama model: {model}")
-            self.llm = ChatOllama(model=model, temperature=0.4)
+        if not groq_api_key:
+            raise ValueError("GROQ_API_KEY is not configured in secrets or environment.")
+            
+        model = model_name or "llama-3.3-70b-versatile"
+        logging.info(f"Initializing ResponseGenerator with Groq: {model}")
+        self.llm = ChatGroq(temperature=0.4, groq_api_key=groq_api_key, model_name=model)
         
         prompt_template = """
 You are a helpful receptionist for a service business.

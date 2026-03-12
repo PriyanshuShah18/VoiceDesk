@@ -3,13 +3,13 @@ import logging
 import dateparser
 import re
 
-from langchain_ollama import ChatOllama
 from langchain_groq import ChatGroq
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional
+from config import get_secret
 
 class ExtractedEntities(BaseModel):
     name: Optional[str] = Field(None, description="The name of the client if mentioned, otherwise null")
@@ -48,19 +48,16 @@ class EntityExtractor:
     def __init__(self, model_name=None):
         """
         Initializes the entity extraction service.
-        Checks for GROQ_API_KEY for cloud mode, otherwise local Ollama.
+        Uses Groq Cloud LLM for structured extraction.
         """
-        groq_api_key = os.getenv("GROQ_API_KEY")
+        groq_api_key = get_secret("GROQ_API_KEY")
         
-        if groq_api_key:
-            model = model_name or "llama-3.3-70b-versatile"
-            logging.info(f"Initializing EntityExtractor with Groq model: {model}")
-            self.llm = ChatGroq(temperature=0, groq_api_key=groq_api_key, model_name=model)
-        else:
-            model = model_name or "llama3"
-            logging.info(f"Initializing EntityExtractor with Local Ollama model: {model}")
-            # Use JSON format for reliable parsing
-            self.llm = ChatOllama(model=model, format="json", temperature=0.0)
+        if not groq_api_key:
+            raise ValueError("GROQ_API_KEY is not configured in secrets or environment.")
+            
+        model = model_name or "llama-3.3-70b-versatile"
+        logging.info(f"Initializing EntityExtractor with Groq: {model}")
+        self.llm = ChatGroq(temperature=0, groq_api_key=groq_api_key, model_name=model)
         self.parser = JsonOutputParser(pydantic_object=ExtractedEntities)
         
         prompt_template = """
