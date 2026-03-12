@@ -76,7 +76,7 @@ def main():
     
     # Language Selection
     st.sidebar.subheader("Language Settings")
-    lang_mode = st.sidebar.radio("Detection Mode", ["Auto-Detect", "Gujarati", "Hindi", "English"])
+    lang_mode = st.sidebar.radio("Detection Mode", ["Auto-Detect", "Gujarati", "English"])
     
     # Provider Selection (Hardcoded to Smart Auto for simplicity)
     selected_provider = "smart"
