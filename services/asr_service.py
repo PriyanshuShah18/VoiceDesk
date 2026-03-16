@@ -186,39 +186,6 @@ class ASRService:
             logging.error(f"Error during Groq transcription: {e}")
             return TranscriptionResponse(text="", language="en").model_dump()
 
-    '''def _transcribe_huggingface(self, audio_path: str, forced_language: str = None) -> dict:
-        logging.info(f"Transcribing via Hugging Face ASR: {audio_path}")
-        lang = forced_language if forced_language else "gu"
-        
-        try:
-            with open(audio_path, "rb") as f:
-                data = f.read()
-            
-            headers = {"Authorization": f"Bearer {self.hf_token}"}
-            response = requests.post(self.hf_api_url, headers=headers, data=data)
-            
-            if response.status_code == 200:
-                result = response.json()
-                
-                # Handle both dict and list responses
-                if isinstance(result, list) and len(result) > 0:
-                    text = result[0].get("text", "").strip()
-                elif isinstance(result, dict):
-                    text = result.get("text", "").strip()
-                else:
-                    text = ""
-                
-                return TranscriptionResponse(text=text, language=lang).model_dump()
-            elif response.status_code == 503:
-                logging.warning("Hugging Face model is loading. Please wait a moment.")
-                return TranscriptionResponse(text="Model is loading on Hugging Face. Please try again in 30 seconds.", language="en").model_dump()
-            else:
-                logging.error(f"Hugging Face ASR failed ({response.status_code}): {response.text}")
-                return TranscriptionResponse(text="", language="en").model_dump()
-        except Exception as e:
-            logging.error(f"Error during Hugging Face transcription: {e}")
-            return TranscriptionResponse(text="", language="en").model_dump()
-'''
     def _transcribe_local(self, audio_path: str, forced_language: str = None) -> dict:
         logging.debug(f"Transcribing locally from: {audio_path} (Forced: {forced_language})")
         

@@ -24,7 +24,8 @@ class DialogueManager:
         logging.debug(f"Updating dialogue state. Intent: {intent}, Entities: {entities}")
         
         # Keep current intent if new intent is UNKNOWN or None, unless it's the very start
-        if intent and intent != "UNKNOWN":
+        if intent and intent != "UNKNOWN" and intent != self.state["intent"]:
+            self.reset_state()
             self.state["intent"] = intent
             
         if entities:
@@ -61,39 +62,47 @@ class DialogueManager:
         if not intent:
             return {
                 "action": "ask_intent",
+                "field": "intent",
                 "missing": ["intent"],
-                "reason": "Initial greeting or unrecognized intent"
+                "reason": "Need to know what the caller wants."
             }
             
         if intent == "BOOK_APPOINTMENT":
             missing_fields = self.get_missing_fields()
             
             if missing_fields:
+                next_field = missing_fields[0]
+
                 return {
-                    "action": "ask_details",
+                    "action": "ask_detail",
+                    "field": next_field,
                     "missing": missing_fields,
-                    "reason": "Need missing details to complete booking"
+                    "reason": f"Need user's {next_field} to continue booking."
                 }
             else:
                 return {
                     "action": "confirm_booking",
-                    "missing": [],
+                    "details": {
+                        "name": self.state["name"],
+                        "date": self.state["date"],
+                        "time": self.state["time"],
+                    },
                     "reason": "All appointment details are collected"
                 }
                 
-        elif intent in ["CHECK_SLOTS", "RESCHEDULE", "CANCEL"]:
+        if intent in ["CHECK_SLOTS", "RESCHEDULE", "CANCEL"]:
             return {
                 "action": "handle_other_intent",
-                "missing": [],
+                "intent": intent,
                 "reason": f"Managing request for {intent}"
             }
             
-        else:
-            return {
-                "action": "ask_clarification",
-                "missing": [],
-                "reason": "Intent recognized but not handled fully yet"
-            }
+        return {
+            "action": "ask_clarification",
+            "field": "intent",
+            "intent": intent,
+            "reason": "User request unclear."
+        }
 
     def reset_state(self):
         """

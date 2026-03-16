@@ -9,6 +9,8 @@ from services.booking_service import BookingService
 from services.response_generator import ResponseGenerator
 from services.tts_service import TTSService
 
+
+
 class VoiceAgent:
     def __init__(self):
         logging.info("Initializing Voice Agent Pipeline...")
@@ -20,6 +22,8 @@ class VoiceAgent:
         self.booking_service = BookingService()
         self.response_generator = ResponseGenerator()
         self.tts = TTSService()
+
+        self.conversation_history = []
         
         logging.info("Voice Agent Pipeline initialized successfully.")
 
@@ -38,6 +42,12 @@ class VoiceAgent:
         language = transcription_result["language"]
         
         logging.info(f"Transcription ({language}): {text}")
+
+        # Store user message
+        self.conversation_history.append({
+            "role": "user",
+            "content": text
+        })
         
         if not text:
             logging.warning("No text transcribed.")
@@ -81,21 +91,37 @@ class VoiceAgent:
         
         if booking_result and booking_result.get("success"):
             self.dialogue_manager.reset_state()
+            self.conversation_history.clear()
             
             #self.dialogue_manager.reset_state()
             logging.info(f"Booking Result: {booking_result}")
 
         # 7. Response Generation
-       # response_text = self.response_generator.generate_response(
-       #     action_details=next_action, 
-       #     state=self.dialogue_manager.state, 
-       #     language=language
-       # )
-        response_text = text
+        try:
+            response_text = self.response_generator.generate_response(
+            action_details=next_action, 
+            state=self.dialogue_manager.get_state(), 
+            language=language,
+            history=self.conversation_history[-6:]  # Last 3 turns
+        )
+        except Exception as e:
+            logging.error(f"Response generation failed: {e}")
+            response_text = "Sorry, I didn't understand that."
 
+        #response_text = text
+
+        # Prevent long speech
+        if len(response_text) > 300:
+            response_text = response_text[:300]
         logging.info(f"Echo Response Text: {response_text}")
-        
+
         logging.info(f"Response Text: {response_text}")
+
+        # Store assistant reply
+        self.conversation_history.append({
+            "role": "assistant",
+            "content": response_text
+        })
 
         if language not in ["en", "hi", "gu"]:
             language= "en"

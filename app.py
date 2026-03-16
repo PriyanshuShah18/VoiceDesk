@@ -140,15 +140,9 @@ def main():
                     val = entities.get("time") or "---"
                     opacity = 1.0 if entities.get("time") else 0.3
                     st.markdown(f'<div class="entity-card" style="opacity: {opacity};"><div class="entity-label">TIME</div><div class="entity-value">{val}</div></div>', unsafe_allow_html=True)
-
+                
                 # Show conversation state
-                st.divider()
-                st.subheader("Conversation State")
-
-                state = agent.dialogue_manager.get_state()
-
-                st.json(state)
-
+                #st.divider()
                 st.divider()
                 st.subheader("Assistant Response")
                 #st.write(result['response_text'])

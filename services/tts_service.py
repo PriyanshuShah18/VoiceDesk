@@ -16,6 +16,12 @@ import soundfile as sf  # Faster audio writing
 
 import streamlit as st
 
+import re
+from num2words import num2words
+from datetime import datetime
+
+
+
 class SpeechRequest(BaseModel):
     model_config = ConfigDict(extra='ignore')
     
@@ -37,7 +43,7 @@ class SpeechRequest(BaseModel):
 
 @st.cache_resource(show_spinner=False)
 def cached_load_mms(model_id):
-    tokenizer, model = load_mms_tts(model_id)
+    tokenizer, model = load_mms_tts(model_id)  # MMS - Massively Multilingual Speech.
     return tokenizer, model
 
 class TTSService:
@@ -62,13 +68,152 @@ class TTSService:
         # Model mapping for local fallback
         self.model_map = {
             "gu": "facebook/mms-tts-guj",
-            #"hi": "facebook/mms-tts-hin",
+            "hi": "facebook/mms-tts-hin",
             "en": "facebook/mms-tts-eng"
         }
         
         # Cache for loaded models
         self.loaded_models = {}
         self.loaded_tokenizers = {}
+
+    @staticmethod
+    def crossfade_audio(chunks, fade_samples=1200):
+        """
+        Smoothly joins audio chunks using crossfade.
+        """
+
+        if not chunks:
+            return np.array([])
+        
+        output = chunks[0]
+
+        for chunk in chunks[1:]:
+
+            fade = min(fade_samples, len(output), len(chunk))
+
+            # fade-out previous audio
+            fade_out = np.linspace(1, 0, fade)
+
+            # fade-in next audio
+            fade_in = np.linspace(0, 1, fade)
+
+            output[-fade:] = output[-fade:] * fade_out + chunk[:fade] * fade_in
+            
+            output = np.concatenate([output, chunk[fade:]])
+
+        return output
+
+    @staticmethod
+    def conversational_chunks(text: str) -> str:
+        text = re.sub(r',',', ', text)
+
+        #text = re.sub(r' and ', '... and ', text)
+        #text = re.sub(r' but ', '... but ',text)
+        #text = re.sub(r' so ','... so ', text)
+        #text = re.sub(r' because ', '... because ', text)
+
+        # break very long sentences
+        if len(text) > 150:
+            text = text.replace(',', '...')
+
+        return text
+
+    @staticmethod
+    def add_speech_pauses(text: str) -> str:
+        """
+        Adds natural pauses for punctuations
+        """
+        text = re.sub(r',', ', ', text)
+        text = re.sub(r'\.','... ',text)
+        text = re.sub(r'\?','?... ',text)
+        text = re.sub(r'!','!... ',text)
+
+        return text
+
+    @staticmethod
+    def normalize_speech_text(text: str) -> str:
+        try:
+            # Time
+            def replace_time(match):
+                hour = int(match.group(1))
+                meridiem = match.group(2).lower()
+
+                hour_word = num2words(hour)
+
+                if meridiem == "pm":
+                    meridiem_word = "pee em"
+                else:
+                    meridiem_word = "ay em"
+
+                return f"{hour_word} {meridiem_word}"
+
+            text = re.sub(
+                r"\b(\d{1,2})\s*(am|pm)\b",
+                replace_time,
+                text,
+                flags=re.IGNORECASE,
+            )
+
+            # TIME FORMAT 17:30 -> five thirty
+            def replace_colon_time(match):
+                hour = int(match.group(1))
+                minute = int(match.group(2))
+
+                hour_word = num2words(hour)
+
+                if minute == 0:
+                    return f"{hour_word} o clock"
+
+                minute_word = num2words(minute)
+
+                return f"{hour_word} {minute_word}"
+
+            text = re.sub(r"\b(\d{1,2}):(\d{2})\b", replace_colon_time, text)
+
+            # Standalone numbers
+
+            def replace_numbers(match):
+                num_str = match.group()
+
+                # If long number -> treat as contact no
+                if len(num_str) >= 7:
+                    return " ".join(num2words(int(d)) for d in num_str)
+                
+                # Otherwise normal number
+                return num2words(int(num_str))
+
+            text = re.sub(r"\b\d+\b", replace_numbers, text)
+
+        except Exception as e:
+            logging.warning(f"Number normalization failed: {e}")
+        
+        # Dates
+        def replace_date(match):
+            try:
+                dt = datetime.strptime(match.group(), "%d/%m/%Y")
+                return dt.strftime("%d %B %Y")
+            except:
+                return match.group()
+            
+        text = re.sub(r'\b\d{1,2}/\d{1,2}/\d{4}\b', replace_date, text)
+
+        # Abbreviations
+
+        abbreviations = {
+            "Dr." : "Doctor",
+            "Mr." : "Mister",
+            "Mrs." : "Missus",
+            "Ms." : "Miss",
+            "Prof." : "Professor",
+            "Inc." : "Incorporated",
+            "Ltd." : "Limited",
+            "St." : "Street",
+            "Ave.": "Avenue"
+        }
+
+        for abbr, full in abbreviations.items():
+            text = text.replace(abbr, full)
+        return text
 
     def _get_mms_model(self, lang_code):
         """
@@ -108,7 +253,12 @@ class TTSService:
 
         if len(text) > max_chars:
             text = text[:max_chars]
-            text = text[:text.rfind(" ")] + "..."
+
+            last_space = text.rfind(" ")
+            if last_space != -1:
+                text = text[:last_space]
+            
+            text += "..."
 
         request = SpeechRequest(text=text, language_code= language_code)
 
@@ -119,29 +269,53 @@ class TTSService:
         try:
             logging.info(f"Generating speech for language '{lang}'")
 
-            inputs = tokenizer(request.text, return_tensors="pt")
-            inputs = {k: v.to(self.device) for k,v in inputs.items()}
+            normalized_text = self.normalize_speech_text(request.text.lower())
 
-            with torch.no_grad():
-                output= model(**inputs)
+            # break text into conversational chunks
+            chunked_text = self.conversational_chunks(normalized_text)
 
-            waveform = output.waveform
+            # add pauses for speech rhythm
+            processed_text = self.add_speech_pauses(chunked_text)
+            
+            sentences = re.split(r'[.!?]+', processed_text)
 
-            audio = waveform.squeeze().cpu().numpy()
+            audio_chunks = []
+
+            for sentence in sentences:
+                sentence = sentence.strip()
+                if not sentence:
+                    continue
+
+                inputs = tokenizer(sentence, return_tensors="pt")
+                inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+                with torch.no_grad():
+                    output = model(**inputs)
+
+                waveform = output.waveform.squeeze().cpu().numpy()
+                audio_chunks.append(waveform)
+
+                # small pause b/w sentences.
+                pause = np.zeros(int(0.08 * model.config.sampling_rate))
+                audio_chunks.append(pause)
+
+            audio = self.crossfade_audio(audio_chunks)
 
             # Squeeze() -> Removes batch dimension
             # cpu() -> Ensures tensor on CPU
             # numpy() -> Convert to numpy, Results in an array of audio samples
             
-            
             peak = np.max(np.abs(audio))
             if peak > 0:
                 audio = audio / peak
-            #audio = output.cpu().numpy().squeeze()
 
-            # Normalize audio
+            # Prevent clipping
+            audio = np.clip(audio, -0.99, 0.99)
 
-            #audio = audio / np.max(np.abs(audio))
+            # Silence padding to prevent clipping
+            pad_duration = int(0.15 * model.config.sampling_rate)   # 150 ms
+            silence = np.zeros(pad_duration, dtype=np.float32)
+            audio = np.concatenate([silence, audio, silence])
 
             sample_rate = model.config.sampling_rate
 
