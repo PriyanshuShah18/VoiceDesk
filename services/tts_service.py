@@ -4,7 +4,7 @@ import os
 from uuid import uuid4
 
 from transformers import VitsModel, AutoTokenizer
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+#from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from utils.model_cache import load_mms_tts
 
@@ -20,26 +20,27 @@ import re
 from num2words import num2words
 from datetime import datetime
 
+from models.schemas import SpeechRequest
 
 
-class SpeechRequest(BaseModel):
-    model_config = ConfigDict(extra='ignore')
+#class SpeechRequest(BaseModel):
+#    model_config = ConfigDict(extra='ignore')
+#    
+#    text: str = Field(description="The text to synthesize")
+#    language_code: str = Field(default="en", description="The ISO code of desired output language")
     
-    text: str = Field(description="The text to synthesize")
-    language_code: str = Field(default="en", description="The ISO code of desired output language")
-    
-    @model_validator(mode="after")
-    def validate_script_safety(self):
-        # Prevent passing English text to non-English models
-        latin_chars = sum(1 for c in self.text if 'a' <= c.lower() <= 'z')
-        total_chars = sum(1 for c in self.text if not c.isspace()) or 1
-        latin_ratio = latin_chars / total_chars
+#    @model_validator(mode="after")
+#    def validate_script_safety(self):
+#        # Prevent passing English text to non-English models
+#        latin_chars = sum(1 for c in self.text if 'a' <= c.lower() <= 'z')
+#        total_chars = sum(1 for c in self.text if not c.isspace()) or 1
+#        latin_ratio = latin_chars / total_chars
         
-        if latin_ratio > 0.5 and self.language_code in ["gu", "hi"]:
-            logging.warning(f"Text appears to be English (Latin script, ratio: {latin_ratio:.2f}) but requested language is '{self.language_code}'. Falling back to 'en' model.")
-            self.language_code = "en"
+#        if latin_ratio > 0.5 and self.language_code in ["gu", "hi"]:
+#            logging.warning(f"Text appears to be English (Latin script, ratio: {latin_ratio:.2f}) but requested language is '{self.language_code}'. Falling back to 'en' model.")
+#            self.language_code = "en"
             
-        return self
+#        return self
 
 @st.cache_resource(show_spinner=False)
 def cached_load_mms(model_id):
@@ -124,15 +125,16 @@ class TTSService:
         Adds natural pauses for punctuations
         """
         text = re.sub(r',', ', ', text)
-        text = re.sub(r'\.','... ',text)
-        text = re.sub(r'\?','?... ',text)
-        text = re.sub(r'!','!... ',text)
+        text = re.sub(r'\.','. ',text)
+        text = re.sub(r'\?','? ',text)
+        text = re.sub(r'!','! ',text)
 
         return text
 
     @staticmethod
     def normalize_speech_text(text: str) -> str:
         try:
+            text = re.sub(r'(\d{4})\s+(\d{6})', r'\1\2', text)
             # Time
             def replace_time(match):
                 hour = int(match.group(1))
@@ -169,24 +171,34 @@ class TTSService:
                 return f"{hour_word} {minute_word}"
 
             text = re.sub(r"\b(\d{1,2}):(\d{2})\b", replace_colon_time, text)
-
             # Standalone numbers
 
             def replace_numbers(match):
                 num_str = match.group()
 
                 # If long number -> treat as contact no
-                if len(num_str) >= 7:
-                    return " ".join(num2words(int(d)) for d in num_str)
+                if len(num_str) >= 10:
+                    # Split for natural speech
+                    first = " ".join(num2words(int(d)) for d in num_str[:5])
+                    second = " ".join(num2words(int(d)) for d in num_str[5:])
+
+                    return f"{first} ... {second}"
+
+                if len(num_str) <= 4:
+                    try:
+                        return num2words(int(num_str))
+                    except:
+                        return num_str
                 
                 # Otherwise normal number
-                return num2words(int(num_str))
+                return num_str
 
             text = re.sub(r"\b\d+\b", replace_numbers, text)
 
         except Exception as e:
             logging.warning(f"Number normalization failed: {e}")
-        
+        # OUTSIDE TRY BLOCK
+
         # Dates
         def replace_date(match):
             try:
@@ -262,6 +274,7 @@ class TTSService:
 
         request = SpeechRequest(text=text, language_code= language_code)
 
+        text = request.text
         lang = request.language_code
 
         tokenizer, model = self._get_mms_model(lang)
@@ -269,7 +282,7 @@ class TTSService:
         try:
             logging.info(f"Generating speech for language '{lang}'")
 
-            normalized_text = self.normalize_speech_text(request.text.lower())
+            normalized_text = self.normalize_speech_text(text.lower())
 
             # break text into conversational chunks
             chunked_text = self.conversational_chunks(normalized_text)
@@ -277,20 +290,36 @@ class TTSService:
             # add pauses for speech rhythm
             processed_text = self.add_speech_pauses(chunked_text)
             
-            sentences = re.split(r'[.!?]+', processed_text)
+            sentences = re.split(r'(?<=[.!?])\s+', processed_text)
 
             audio_chunks = []
 
             for sentence in sentences:
                 sentence = sentence.strip()
-                if not sentence:
+
+                #remove punctuation-only junk 
+                sentence = re.sub(r'[^\w\s.,!?]', '', sentence)
+                if not sentence or len(sentence.strip()) < 2:
                     continue
 
-                inputs = tokenizer(sentence, return_tensors="pt")
+                inputs = tokenizer(
+                    sentence,
+                    return_tensors="pt",
+                    truncation=True,
+                    max_length=200,
+                    )
+                if inputs["input_ids"].shape[1] == 0:
+                    logging.warning(f"Skipping empty tokenized sentence: {sentence}")
+                    continue
+
                 inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
-                with torch.no_grad():
-                    output = model(**inputs)
+                try:
+                    with torch.no_grad():
+                        output = model(**inputs)
+                except Exception as e:
+                    logging.warning(f"Skipped bad sentence: {sentence} | {e}")
+                    continue
 
                 waveform = output.waveform.squeeze().cpu().numpy()
                 audio_chunks.append(waveform)
@@ -299,14 +328,26 @@ class TTSService:
                 pause = np.zeros(int(0.08 * model.config.sampling_rate))
                 audio_chunks.append(pause)
 
+            if len(audio_chunks) == 0:
+                logging.warning("No audio chunks generated.")
+                
+                inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=200)
+                inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+                with torch.no_grad():
+                    output = model(**inputs)
+
+            else:
+                audio = output.waveform.squeeze().cpu().numpy()
+
             audio = self.crossfade_audio(audio_chunks)
 
             # Squeeze() -> Removes batch dimension
             # cpu() -> Ensures tensor on CPU
             # numpy() -> Convert to numpy, Results in an array of audio samples
-            
+
             peak = np.max(np.abs(audio))
-            if peak > 0:
+            if peak > 1e-6:
                 audio = audio / peak
 
             # Prevent clipping

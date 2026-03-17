@@ -1,4 +1,5 @@
 import logging
+from models.schemas import EntityResponse
 
 class DialogueManager:
     def __init__(self):
@@ -17,24 +18,39 @@ class DialogueManager:
         """
         return self.state
 
-    def update_state(self, intent: str, entities: dict):
+    def update_state(self, intent: str, entities: EntityResponse | dict):
         """
         Updates the conversation state with new intent and entities.
         """
+        if isinstance(entities, EntityResponse):
+            entities = entities.model_dump()
         logging.debug(f"Updating dialogue state. Intent: {intent}, Entities: {entities}")
         
         # Keep current intent if new intent is UNKNOWN or None, unless it's the very start
-        if intent and intent != "UNKNOWN" and intent != self.state["intent"]:
-            self.reset_state()
-            self.state["intent"] = intent
+        if intent and intent != "UNKNOWN":
+            if self.state["intent"] is None:
+                self.state["intent"] = intent
+            # Only reset if switching to completely different flow
+            elif intent != self.state["intent"]:
+                logging.info(f"Intent changed: {self.state['intent']} → {intent}")
+                self.reset_state()
+                self.state["intent"] = intent
             
-        if entities:
+        if entities is not None:
             if entities.get("name"): self.state["name"] = entities.get("name")
             if entities.get("phone"): self.state["phone"] = entities.get("phone")
             if entities.get("date"): self.state["date"] = entities.get("date")
             if entities.get("time"): self.state["time"] = entities.get("time")
             
+        self.validate_state()
+
         logging.info(f"Current State: {self.state}")
+    
+    
+    def validate_state(self):
+        if self.state["phone"] and (len(self.state["phone"]) != 10 or not self.state["phone"].isdigit()):
+            logging.warning("Invalid phone detected, resetting")
+            self.state["phone"] = None
 
     def get_missing_fields(self):
         """
@@ -50,6 +66,8 @@ class DialogueManager:
             missing.append("date")
         if not self.state.get("time"):
             missing.append("time")
+       
+        
 
         return missing
 
@@ -81,7 +99,7 @@ class DialogueManager:
                 }
             else:
                 return {
-                    "action": "confirm_booking",
+                    "action": "confirm_details",
                     "details": {
                         "name": self.state["name"],
                         "date": self.state["date"],
@@ -89,6 +107,22 @@ class DialogueManager:
                     },
                     "reason": "All appointment details are collected"
                 }
+        if intent == "CONFIRM":
+            missing_fields = self.get_missing_fields()
+
+            if missing_fields:
+                return{
+                    "action": "ask_detail",
+                    "field": missing_fields[0],
+                    "missing": missing_fields,
+                    "reason": "Cannot confirm yet, missing required details"
+                }
+            return {
+                "action": "finalize_booking",
+                "details": self.state,
+                "reason": "User confirmed details"
+            }
+
                 
         if intent in ["CHECK_SLOTS", "RESCHEDULE", "CANCEL"]:
             return {

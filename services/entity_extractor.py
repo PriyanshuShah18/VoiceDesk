@@ -7,42 +7,11 @@ from langchain_groq import ChatGroq
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 
-from pydantic import BaseModel, Field, field_validator
+#from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 from config import get_secret
 
-class ExtractedEntities(BaseModel):
-    name: Optional[str] = Field(None, description="The name of the client if mentioned, otherwise null")
-    phone: Optional[str] = Field(None, description="The contact phone number of the client if mentioned, otherwise null")
-    date_time_mention: Optional[str] = Field(None, description="The raw text phrase mentioning the requested date and/or time, otherwise null")
-
-# Normalize Contact numbers
-
-    @field_validator("phone", mode="before")
-    def normalize_contact(cls,value):
-        if not value:
-            return None
-
-        digits = "".join(c for c in str(value) if c.isdigit())
-
-        if digits.startswith("91") and len(digits) ==12:
-            digits= digits[2:]
-        
-        if len(digits) ==10:
-            return digits
-        return None
-
-    # Sanity check for names
-    @field_validator("name")
-    def validate_name(cls,value):
-        if not value:
-            return None
-        words = value.split()
-
-        # Avoid hallucinated long names
-        if len(words) >3:
-            return None
-        return value
+from models.schemas import EntityResponse
 
 class EntityExtractor:
     def __init__(self, model_name=None):
@@ -58,7 +27,7 @@ class EntityExtractor:
         model = model_name or "llama-3.3-70b-versatile"
         logging.info(f"Initializing EntityExtractor with Groq: {model}")
         self.llm = ChatGroq(temperature=0, groq_api_key=groq_api_key, model_name=model)
-        self.parser = JsonOutputParser(pydantic_object=ExtractedEntities)
+        self.parser = JsonOutputParser(pydantic_object=EntityResponse)
         
         prompt_template = """
 You are an AI assistant that extracts specific information from user text for an appointment booking system.
@@ -68,7 +37,10 @@ The user may speak in Gujarati, Hindi or English.
 Extract:
 - client's name,
 - phone number,
-- any phrase mentioning date or time.
+- date_time_mention (raw phrase like "tomorrow at 5pm")
+
+IMPORTANT:
+- Use key exactly as: date_time_mention
 
 If a field is not mentioned return null.
 
@@ -115,7 +87,7 @@ User input: "{text}"
             logging.debug(f"LLM Extraction Result: {parsed_dict}")
             
             # Use Pydantic to ensure the dictionary strictly matches what we expect
-            validated_entities = ExtractedEntities(**parsed_dict)
+            validated_entities = EntityResponse(**parsed_dict)
 
             regex_phone = self._extract_phone_regex(text)
             
@@ -126,7 +98,10 @@ User input: "{text}"
                 "time": None
             }
             # Parse the datetime string using dateparser
-            dt_phrase = validated_entities.date_time_mention
+            dt_phrase = getattr(validated_entities,"date_time_mention", None)
+            if not dt_phrase:
+                dt_phrase = None
+
             parsed_dt= None
 
             if dt_phrase:
@@ -161,10 +136,10 @@ User input: "{text}"
             # MULTI TURN ENTITY MERGING
             if previous_state:
                 for key in ["name","phone","date","time"]:
-                    if not final_entities.get(key) and previous_state.get(key):
+                    if final_entities.get(key) in [None, ""] and previous_state.get(key):
                         final_entities[key] = previous_state[key]
 
-            return final_entities
+            return EntityResponse(**final_entities).model_dump()
             
         except Exception as e:
             logging.error(f"Error during entity extraction: {e}")

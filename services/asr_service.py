@@ -2,32 +2,12 @@ import os
 import logging
 from faster_whisper import WhisperModel
 import requests
-from pydantic import BaseModel, Field, field_validator
-from transformers import AutoModel
+
 import torchaudio
 import torch
 
+from models.schemas import ASRResponse
 from utils.model_cache import load_indic_conformer
-
-class TranscriptionResponse(BaseModel):
-    text: str = Field(description="The transcribed text")
-    language: str = Field(description="The ISO 639-1 language code (e.g., 'en', 'gu', 'hi')")
-
-    @field_validator("language", mode="before")
-    def validate_language(cls, v, info):
-        # We can extract text from the current model values being validated
-        # 'data' in pydantic v2 is accessed via info.data
-        if 'text' in info.data:
-            text = info.data['text']
-            
-            latin_count = sum(1 for c in text if 'a' <= c.lower() <= 'z')
-            investigate_indic = sum(1 for c in text if '\u0A80' <= c <= '\u0AFF' or '\u0900' <= c <= '\u097F')
-            
-            if investigate_indic > 2 and investigate_indic > (latin_count / 2):
-                return "gu"
-            else:
-                return "en"
-        return v or "en"
 
 class ASRService:
     def __init__(self, model_size="medium", device="cpu", compute_type="int8"):
@@ -54,7 +34,6 @@ class ASRService:
                 logging.info("IndicConformer loaded successfully.")
             else:
                 logging.warning("IndicConformer failed to load.")
-        self.hf_token = os.getenv("HF_TOKEN")
         self.hf_api_url = "https://router.huggingface.co/models/ai4bharat/indic-conformer-600m-multilingual"
     
 
@@ -75,7 +54,7 @@ class ASRService:
 
         if self.indic_model is None:
             logging.warning("IndicConformer not loaded (DISABLE_LOCAL_ASR=true). Skipping.")
-            return TranscriptionResponse(text="", language="en").model_dump()
+            return ASRResponse(text="", language="en").model_dump()
 
         try:
             speech, sr = torchaudio.load(audio_path)
@@ -92,11 +71,11 @@ class ASRService:
             # forward(wav, lang, decoding='ctc') — lang must be 'gu', 'hi', 'en', etc.
             text = self.indic_model(speech, "gu", decoding="ctc")
 
-            return TranscriptionResponse(text=text, language="gu").model_dump()
+            return ASRResponse(text=text, language="gu").model_dump()
 
         except Exception as e:
             logging.error(f"IndicConformer transcription failed: {e}")
-            return TranscriptionResponse(text="", language="en").model_dump()
+            return ASRResponse(text="", language="en").model_dump()
 
     def transcribe(self, audio_path: str, forced_language: str = None, provider: str = "auto") -> dict:
         """
@@ -109,13 +88,13 @@ class ASRService:
             return self._transcribe_indic(audio_path)
         elif (provider == "groq") and self.groq_api_key:
             return self._transcribe_groq(audio_path, forced_language)
-        elif provider == "local" or self.model:
+        elif provider == "local" and self.model:
             return self._transcribe_local(audio_path, forced_language)
         else:
             # Fallback chain
             if self.groq_api_key:
                  return self._transcribe_groq(audio_path, forced_language)
-            return TranscriptionResponse(text="", language="en").model_dump()
+            return ASRResponse(text="", language="en").model_dump()
 
     def _transcribe_smart(self, audio_path: str, forced_language: str = None) -> dict:
         """
@@ -145,7 +124,7 @@ class ASRService:
                 logging.warning("HF result too short, falling back to Groq.")
                 return groq_result
                 
-            #return indic_result
+            return indic_result
             
         return groq_result
 
@@ -169,22 +148,24 @@ class ASRService:
             
             if response.status_code == 200:
                 result = response.json()
-                text = result.get("text", "").strip()
+                text = (result.get("text") or "").strip()
+                if not text:
+                    return ASRResponse(text="", language="en").model_dump()
                 
                 # If we forced a language, return it
                 if forced_language:
-                    return TranscriptionResponse(text=text, language=forced_language).model_dump()
+                    return ASRResponse(text=text, language=forced_language).model_dump()
                 
                 # Let Pydantic validator handle the script detection
-                response_obj = TranscriptionResponse(text=text, language="")
+                response_obj = ASRResponse(text=text, language=None)
                 logging.info(f"Groq Cloud Result - Pydantic detected language: {response_obj.language}")
                 return response_obj.model_dump()
             else:
                 logging.error(f"Groq ASR failed ({response.status_code}): {response.text}")
-                return TranscriptionResponse(text="", language="en").model_dump()
+                return ASRResponse(text="", language="en").model_dump()
         except Exception as e:
             logging.error(f"Error during Groq transcription: {e}")
-            return TranscriptionResponse(text="", language="en").model_dump()
+            return ASRResponse(text="", language="en").model_dump()
 
     def _transcribe_local(self, audio_path: str, forced_language: str = None) -> dict:
         logging.debug(f"Transcribing locally from: {audio_path} (Forced: {forced_language})")
@@ -206,4 +187,4 @@ class ASRService:
             if detected_lang not in supported:
                 detected_lang = "en"
         
-        return TranscriptionResponse(text=text.strip(), language=detected_lang).model_dump()
+        return ASRResponse(text=text.strip(), language=detected_lang).model_dump()

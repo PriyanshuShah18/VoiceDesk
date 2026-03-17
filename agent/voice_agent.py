@@ -1,5 +1,4 @@
 import logging
-import os
 
 from services.asr_service import ASRService
 from services.intent_service import IntentService
@@ -22,7 +21,6 @@ class VoiceAgent:
         self.booking_service = BookingService()
         self.response_generator = ResponseGenerator()
         self.tts = TTSService()
-
         self.conversation_history = []
         
         logging.info("Voice Agent Pipeline initialized successfully.")
@@ -39,29 +37,28 @@ class VoiceAgent:
         transcription_result = self.asr.transcribe(audio_path, forced_language=forced_language)
         
         text = transcription_result["text"]
-        language = transcription_result["language"]
+        language = (transcription_result.get("language") or "en").lower()
+
+        if language not in ["en", "hi", "gu"]:
+            language= "en"
         
         logging.info(f"Transcription ({language}): {text}")
 
+        if not text or len(text.strip()) <2:
+            logging.warning("Empty or very short input.")
+            return {
+                "transcription": text,
+                "language": language,
+                "intent": "NONE",
+                "entities": {},
+                "response_text": "Could you please say that again?",
+                "audio_path": None
+            }
         # Store user message
         self.conversation_history.append({
             "role": "user",
             "content": text
         })
-        
-        if not text:
-            logging.warning("No text transcribed.")
-
-            fallback = "I couldn't hear anything. Please try again."
-
-            return {
-                "transcription": "",
-                "language": language,
-                "intent": "NONE",
-                "entities": {},
-                "response_text": fallback,
-                "audio_path": None
-            }
 
         # 3. Intent Detection
         intent = self.intent_service.detect_intent(text)
@@ -69,7 +66,11 @@ class VoiceAgent:
         logging.info(f"Detected Intent: {intent}")
 
         # 4. Entity Extraction
-        entities = self.entity_extractor.extract_entities(text)
+        entities = self.entity_extractor.extract_entities(
+            text,
+            language=language,
+            previous_state=self.dialogue_manager.get_state()
+            )
 
         logging.info(f"Extracted Entities: {entities}")
 
@@ -83,8 +84,10 @@ class VoiceAgent:
         # 6. Booking Logic (if applicable)
         booking_result = None
         
-        if next_action["action"] == "confirm_booking":
-            booking_result = self.booking_service.book_appointment(self.dialogue_manager.state)
+        if next_action["action"] == "finalize_booking":
+            booking_result = self.booking_service.book_appointment(
+                self.dialogue_manager.get_state()
+                )
             
             next_action["booking_result"] = booking_result
             # Reset conversation state after booking attempt
@@ -102,7 +105,7 @@ class VoiceAgent:
             action_details=next_action, 
             state=self.dialogue_manager.get_state(), 
             language=language,
-            history=self.conversation_history[-6:]  # Last 3 turns
+            history=self.conversation_history[-4:]  # Last 3 turns
         )
         except Exception as e:
             logging.error(f"Response generation failed: {e}")
@@ -112,7 +115,18 @@ class VoiceAgent:
 
         # Prevent long speech
         if len(response_text) > 300:
-            response_text = response_text[:300]
+            cut_text = response_text[:300]
+            last_punct = max(
+                cut_text.rfind("."),
+                cut_text.rfind("?"),
+                cut_text.rfind("!")
+            )
+
+            if last_punct != -1:
+                response_text = cut_text[:last_punct+1]
+            else:
+                response_text = cut_text
+            
         logging.info(f"Echo Response Text: {response_text}")
 
         logging.info(f"Response Text: {response_text}")
@@ -123,14 +137,15 @@ class VoiceAgent:
             "content": response_text
         })
 
-        if language not in ["en", "hi", "gu"]:
-            language= "en"
-
         try:
-            output_audio_path = self.tts.generate_speech(
-                response_text,
-                language_code= language
-            )
+
+            if not response_text.strip():
+                output_audio_path = None
+            else:
+                output_audio_path = self.tts.generate_speech(
+                    response_text,
+                    language_code=language
+                )
         except Exception as e:
             logging.error(f"TTS failed: {e}")
             output_audio_path = None

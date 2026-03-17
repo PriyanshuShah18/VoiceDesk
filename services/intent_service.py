@@ -3,33 +3,37 @@ import logging
 from langchain_groq import ChatGroq
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
-from pydantic import BaseModel, Field, field_validator
+#from pydantic import BaseModel, Field, field_validator
+
+from models.schemas import IntentResponse
 
 SUPPORTED_INTENTS = [
     "BOOK_APPOINTMENT",
     "CHECK_SLOTS",
     "RESCHEDULE",
     "CANCEL",
+    "CONFIRM",
     "UNKNOWN"
 ]
 
-class IntentResult(BaseModel):
-    intent: str = Field(description="One of : BOOK_APPOINTMENT, CHECK_SLOTS, RESCHEDULE, CANCEL, UNKNOWN")
+
+#class IntentResult(BaseModel):
+#    intent: str = Field(description="One of : BOOK_APPOINTMENT, CHECK_SLOTS, RESCHEDULE, CANCEL, UNKNOWN")
     
-    @field_validator("intent", mode="before")
-    def validate_and_sanitize_intent(cls, v):
-        if not v:
-            return "UNKNOWN"
+#    @field_validator("intent", mode="before")
+#    def validate_and_sanitize_intent(cls, v):
+#        if not v:
+#            return "UNKNOWN"
             
-        # Clean up output string to pure uppercase alphameric
-        intent = str(v).strip().upper()
-        intent = ''.join(c for c in intent if c.isalpha() or c == '_')
+#        # Clean up output string to pure uppercase alphameric
+#        intent = str(v).strip().upper()
+#        intent = ''.join(c for c in intent if c.isalpha() or c == '_')
         
-        if intent not in SUPPORTED_INTENTS:
-            logging.warning(f"Unexpected intent generated: {intent}")
-            return "UNKNOWN"
+#        if intent not in SUPPORTED_INTENTS:
+#            logging.warning(f"Unexpected intent generated: {intent}")
+#            return "UNKNOWN"
             
-        return intent
+#        return intent
 
 class IntentService:
     def __init__(self, model_name=None):
@@ -68,7 +72,7 @@ Return ONLY a JSON object following this schema:
 User input:
 {text}
 """
-        self.parser= JsonOutputParser(pydantic_object=IntentResult)
+        self.parser= JsonOutputParser(pydantic_object=IntentResponse)
 
         self.prompt = PromptTemplate(
             template=prompt_template,

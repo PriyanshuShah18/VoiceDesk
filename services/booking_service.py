@@ -9,6 +9,8 @@ from pymongo.errors import DuplicateKeyError
 import certifi
 from config import get_secret
 
+from models.schemas import BookingRequest
+
 @st.cache_resource
 def get_mongo_client():
 
@@ -97,6 +99,13 @@ class BookingService:
         if not all([date, time, name, phone]):
             logging.error("Missing details for booking")
             return {"success": False, "message": "Missing necessary booking details."}
+        
+        # Enforce Pydantic validation (e.g., 10-digit phone number)
+        try:
+            BookingRequest(name=name, phone=phone, date=date, time=time)
+        except Exception as e:
+            logging.error(f"Validation failed for booking: {e}")
+            return {"success": False, "message": str(e)}
         
         if not self.check_availability(date,time):
             return{

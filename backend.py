@@ -10,6 +10,8 @@ from typing import Dict, Any, Optional
 
 from agent.voice_agent import VoiceAgent
 
+from models.schemas import VoiceResponse
+
 # Configure Logging
 logging.basicConfig(
     level=logging.INFO,
