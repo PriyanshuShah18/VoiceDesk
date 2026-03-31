@@ -22,26 +22,6 @@ from datetime import datetime
 
 from models.schemas import SpeechRequest
 
-
-#class SpeechRequest(BaseModel):
-#    model_config = ConfigDict(extra='ignore')
-#    
-#    text: str = Field(description="The text to synthesize")
-#    language_code: str = Field(default="en", description="The ISO code of desired output language")
-    
-#    @model_validator(mode="after")
-#    def validate_script_safety(self):
-#        # Prevent passing English text to non-English models
-#        latin_chars = sum(1 for c in self.text if 'a' <= c.lower() <= 'z')
-#        total_chars = sum(1 for c in self.text if not c.isspace()) or 1
-#        latin_ratio = latin_chars / total_chars
-        
-#        if latin_ratio > 0.5 and self.language_code in ["gu", "hi"]:
-#            logging.warning(f"Text appears to be English (Latin script, ratio: {latin_ratio:.2f}) but requested language is '{self.language_code}'. Falling back to 'en' model.")
-#            self.language_code = "en"
-            
-#        return self
-
 @st.cache_resource(show_spinner=False)
 def cached_load_mms(model_id):
     tokenizer, model = load_mms_tts(model_id)  # MMS - Massively Multilingual Speech.

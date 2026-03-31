@@ -12,28 +12,8 @@ SUPPORTED_INTENTS = [
     "CHECK_SLOTS",
     "RESCHEDULE",
     "CANCEL",
-    "CONFIRM",
     "UNKNOWN"
 ]
-
-
-#class IntentResult(BaseModel):
-#    intent: str = Field(description="One of : BOOK_APPOINTMENT, CHECK_SLOTS, RESCHEDULE, CANCEL, UNKNOWN")
-    
-#    @field_validator("intent", mode="before")
-#    def validate_and_sanitize_intent(cls, v):
-#        if not v:
-#            return "UNKNOWN"
-            
-#        # Clean up output string to pure uppercase alphameric
-#        intent = str(v).strip().upper()
-#        intent = ''.join(c for c in intent if c.isalpha() or c == '_')
-        
-#        if intent not in SUPPORTED_INTENTS:
-#            logging.warning(f"Unexpected intent generated: {intent}")
-#            return "UNKNOWN"
-            
-#        return intent
 
 class IntentService:
     def __init__(self, model_name=None):
